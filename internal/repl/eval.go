@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"log/slog"
 	"strings"
 )
 
@@ -29,7 +28,6 @@ func (e eval) Scan(r io.Reader) {
 		b.WriteString(scanner.Text())
 	}
 	expr, err := tokens(b.String())
-	slog.Info("tokens", "expr", expr, "err", err)
 	if err != nil {
 		e.err <- err
 		return
