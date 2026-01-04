@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -26,10 +27,16 @@ func main() {
 			fmt.Println("Bye ❤️")
 			return
 		case err := <-err:
-			fmt.Println("<ERROR>", err)
+			fmt.Fprintln(os.Stderr, "<SCAN ERROR>", err)
 		case expr := <-next:
+			cmd := exec.Command("jj", expr...)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintln(os.Stderr, "<CMD ERROR>", err)
+			}
 			isReading = false
-			fmt.Println("<", expr, ">")
 		default:
 			if !isReading {
 				fmt.Print("> ")
