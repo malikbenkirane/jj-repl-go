@@ -28,6 +28,7 @@ func main() {
 			return
 		case err := <-err:
 			fmt.Fprintln(os.Stderr, "<SCAN ERROR>", err)
+			isReading = true
 		case expr := <-next:
 			cmd := exec.Command("jj", expr...)
 			cmd.Stdin = os.Stdin
