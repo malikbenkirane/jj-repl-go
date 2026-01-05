@@ -66,18 +66,23 @@ func special(expr []string) (found bool, err error) {
 		return false, nil
 	}
 	if use[0] == '.' && len(use) == 1 {
-		fmt.Println("try .yac")
 		return true, nil
 	}
 	if use[0] != '.' {
 		return false, nil
 	}
-	if use == ".yac" {
+	switch use {
+	case ".yac", ".yag", ".y":
 		cmd := exec.Command("yac", append([]string{"--no-post", "--debug-prompt"}, expr[1:]...)...)
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		return true, cmd.Run()
 	}
-	return false, nil
+	specialHelp()
+	return false, fmt.Errorf("unknown command %q", use)
+}
+
+func specialHelp() {
+	fmt.Println("try .yac or .yag")
 }
