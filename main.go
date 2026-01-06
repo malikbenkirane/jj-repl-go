@@ -78,6 +78,28 @@ func special(expr []string) (found bool, err error) {
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		return true, cmd.Run()
+	case ".ignore":
+		f, err := os.OpenFile(".gitignore", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			return true, err
+		}
+		defer func() {
+			if err := f.Close(); err != nil {
+				fmt.Fprintln(os.Stderr, "⚠️ unable to close .gitignore")
+			}
+		}()
+		for _, name := range expr[1:] {
+			if _, err := os.Stat(name); err != nil {
+				fmt.Fprintln(os.Stderr, err, "unable to proceed with", name)
+				continue
+			}
+			fmt.Println("adding", name, "to .gitignore")
+			if _, err := fmt.Fprintln(f, name); err != nil {
+				fmt.Fprintln(os.Stderr, err, "unable to proceed with", name)
+			}
+			fmt.Println("✅", name, "added to .gitignore")
+		}
+		return true, nil
 	}
 	specialHelp()
 	return false, fmt.Errorf("unknown command %q", use)
