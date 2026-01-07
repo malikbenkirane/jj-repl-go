@@ -72,14 +72,24 @@ func special(expr []string) (found bool, err error) {
 	if use[0] != '.' {
 		return false, nil
 	}
-	switch use {
-	case ".yac", ".yag", ".y":
-		cmd := exec.Command("yac", append([]string{"--no-post", "--debug-prompt"}, expr[1:]...)...)
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		return true, cmd.Run()
-	case ".ignore":
+	switch use[1:] {
+	case "yac":
+		yac := func(args ...string) *exec.Cmd {
+			cmd := exec.Command("yac", append(args, expr[1:]...)...)
+			cmd.Stderr = os.Stderr
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			return cmd
+		}
+		args := []string{}
+		if len(expr) >= 2 && len(expr[1]) > 0 && expr[1][0] == '.' {
+			switch expr[1][1:] {
+			case "prompt":
+				args = []string{"--no-post", "--debug-prompt"}
+			}
+		}
+		return true, yac(args...).Run()
+	case "ignore":
 		f, err := os.OpenFile(".gitignore", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return true, err
