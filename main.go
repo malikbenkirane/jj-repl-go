@@ -72,23 +72,18 @@ func special(expr []string) (found bool, err error) {
 	if use[0] != '.' {
 		return false, nil
 	}
+	extra := map[string]map[string][]string{
+		"yac": {
+			"prompt": {"--no-post", "--debug-prompt"},
+		},
+		"exa": {
+			"tree": {"-T"},
+		},
+	}
 	switch use[1:] {
-	case "yac":
-		yac := func(args ...string) *exec.Cmd {
-			cmd := exec.Command("yac", append(args, expr[1:]...)...)
-			cmd.Stderr = os.Stderr
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			return cmd
-		}
-		args := []string{}
-		if len(expr) >= 2 && len(expr[1]) > 0 && expr[1][0] == '.' {
-			switch expr[1][1:] {
-			case "prompt":
-				args = []string{"--no-post", "--debug-prompt"}
-			}
-		}
-		return true, yac(args...).Run()
+	case "exa", "yac":
+		cmd := use[1:]
+		return true, stdAttachCmd(cmd, parseDotArgs(extra[cmd], expr)...).Run()
 	case "ignore":
 		f, err := os.OpenFile(".gitignore", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
@@ -118,4 +113,22 @@ func special(expr []string) (found bool, err error) {
 
 func specialHelp() {
 	fmt.Println("try .yac or .yag")
+}
+
+func stdAttachCmd(command string, args ...string) *exec.Cmd {
+	cmd := exec.Command(command, args...)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	cmd.Stdin = os.Stdin
+	return cmd
+}
+
+func parseDotArgs(dotArgs map[string][]string, expr []string) (args []string) {
+	if len(expr) >= 2 && len(expr[1]) > 0 && expr[1][0] == '.' {
+		prepend, ok := dotArgs[expr[1][1:]]
+		if ok {
+			return append(prepend, expr[2:]...)
+		}
+	}
+	return expr[1:]
 }
