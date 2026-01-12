@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"syscall"
 
 	reader "github.com/4sp1/jrl/internal/repl"
@@ -25,6 +28,8 @@ func main() {
 
 	var isReading bool
 
+	var env env
+
 loop:
 	for {
 		select {
@@ -36,7 +41,7 @@ loop:
 			fmt.Fprintln(os.Stderr, "<SCAN ERROR>", err)
 		case expr := <-next:
 			isReading = false
-			found, err := special(expr)
+			found, err := env.special(expr)
 			if err != nil {
 				if errors.Is(err, ErrExit) {
 					fmt.Println()
@@ -50,11 +55,7 @@ loop:
 				fmt.Println("<SPECIAL CMD 👍>")
 				continue loop
 			}
-			cmd := exec.Command("jj", expr...)
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
+			if err := env.stdAttachCmd("jj", expr...).Run(); err != nil {
 				fmt.Fprintln(os.Stderr, "<CMD ERROR>", err)
 			}
 		default:
@@ -67,10 +68,20 @@ loop:
 	}
 }
 
+type sshAgent struct {
+	sock string
+	key  string
+}
+
+type env struct {
+	ssh  *sshAgent
+	home string
+}
+
 // ErrExit is returned when the REPL user requests to exit the session.
 var ErrExit = errors.New("EOREPL")
 
-func special(expr []string) (found bool, err error) {
+func (env *env) special(expr []string) (found bool, err error) {
 	if len(expr) == 0 {
 		return false, nil
 	}
@@ -95,9 +106,37 @@ func special(expr []string) (found bool, err error) {
 	switch use[1:] {
 	case "quit", "exit", "bye":
 		return true, ErrExit
+	case "ssh-agent":
+		if env.ssh == nil {
+			if err := env.promptSshAgent(os.Stdin); err != nil {
+				return true, err
+			}
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return true, err
+		}
+		env.home = home
+		sshDir := path.Join(home, ".ssh")
+		if len(expr) != 2 {
+			fmt.Printf("Expected `.ssh-key NAME` (name searched in %s)\n", sshDir)
+			return true, err
+		}
+		name := expr[1]
+		if _, err := os.Stat(name); err != nil {
+			return true, err
+		}
+		key := path.Join(sshDir, name)
+		cmd := exec.Command("ssh-add", key)
+		env.attachAgent(cmd)
+		if err := cmd.Run(); err != nil {
+			return true, err
+		}
+		env.ssh.key = key
+		return true, nil
 	case "exa", "yac":
 		cmd := use[1:]
-		return true, stdAttachCmd(cmd, parseDotArgs(extra[cmd], expr)...).Run()
+		return true, env.stdAttachCmd(cmd, parseDotArgs(extra[cmd], expr)...).Run()
 	case "ignore":
 		f, err := os.OpenFile(".gitignore", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
@@ -129,11 +168,21 @@ func specialHelp() {
 	fmt.Println("")
 }
 
-func stdAttachCmd(command string, args ...string) *exec.Cmd {
+func (env env) attachAgent(cmd *exec.Cmd) {
+	if env.ssh != nil {
+		cmd.Env = append(cmd.Env, "HOME="+env.home)
+		cmd.Env = append(cmd.Env, "SSH_AUTH_SOCK="+env.ssh.sock)
+		cmd.Env = append(cmd.Env, "SSH_ENV="+path.Join(env.home, ".ssh", "environment"))
+	}
+}
+
+func (env env) stdAttachCmd(command string, args ...string) *exec.Cmd {
 	cmd := exec.Command(command, args...)
+	env.attachAgent(cmd)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	cmd.Stdin = os.Stdin
+	fmt.Println(cmd.Env)
 	return cmd
 }
 
@@ -145,4 +194,18 @@ func parseDotArgs(dotArgs map[string][]string, expr []string) (args []string) {
 		}
 	}
 	return expr[1:]
+}
+
+func (env *env) promptSshAgent(from io.Reader) error {
+	r := bufio.NewReader(from)
+	fmt.Print("Agent Sock: ")
+	sock, err := r.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	if env.ssh == nil {
+		env.ssh = new(sshAgent)
+	}
+	env.ssh.sock = sock
+	return nil
 }
