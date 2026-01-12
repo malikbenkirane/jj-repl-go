@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +16,11 @@ func main() {
 	signal.Notify(cancel, syscall.SIGTERM, syscall.SIGINT)
 
 	next := make(chan []string)
+	defer close(next)
+
 	err := make(chan error)
+	defer close(err)
+
 	eval := reader.NewEval(next, err)
 
 	var isReading bool
@@ -33,6 +38,11 @@ loop:
 			isReading = false
 			found, err := special(expr)
 			if err != nil {
+				if errors.Is(err, ErrExit) {
+					fmt.Println()
+					fmt.Println("Bye ❤️")
+					return
+				}
 				fmt.Fprintln(os.Stderr, "<SPECIAL CMD ERROR>", err)
 				continue loop
 			}
@@ -57,6 +67,9 @@ loop:
 	}
 }
 
+// ErrExit is returned when the REPL user requests to exit the session.
+var ErrExit = errors.New("EOREPL")
+
 func special(expr []string) (found bool, err error) {
 	if len(expr) == 0 {
 		return false, nil
@@ -80,6 +93,8 @@ func special(expr []string) (found bool, err error) {
 		},
 	}
 	switch use[1:] {
+	case "quit", "exit", "bye":
+		return true, ErrExit
 	case "exa", "yac":
 		cmd := use[1:]
 		return true, stdAttachCmd(cmd, parseDotArgs(extra[cmd], expr)...).Run()
@@ -111,7 +126,7 @@ func special(expr []string) (found bool, err error) {
 }
 
 func specialHelp() {
-	fmt.Println("try .yac or .yag")
+	fmt.Println("")
 }
 
 func stdAttachCmd(command string, args ...string) *exec.Cmd {
