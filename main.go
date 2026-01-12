@@ -95,6 +95,15 @@ func special(expr []string) (found bool, err error) {
 	switch use[1:] {
 	case "quit", "exit", "bye":
 		return true, ErrExit
+	case "sh":
+		shell := "sh"
+		{
+			userShell, found := os.LookupEnv("SHELL")
+			if found {
+				shell = userShell
+			}
+		}
+		return true, stdAttachCmd(shell).Run()
 	case "exa", "yac":
 		cmd := use[1:]
 		return true, stdAttachCmd(cmd, parseDotArgs(extra[cmd], expr)...).Run()
