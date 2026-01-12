@@ -24,10 +24,11 @@ loop:
 	for {
 		select {
 		case <-cancel:
+			isReading = false
 			fmt.Println()
 		case err := <-err:
+			isReading = false
 			fmt.Fprintln(os.Stderr, "<SCAN ERROR>", err)
-			isReading = true
 		case expr := <-next:
 			isReading = false
 			found, err := special(expr)
