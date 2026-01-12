@@ -11,8 +11,8 @@ import (
 )
 
 func main() {
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+	cancel := make(chan os.Signal, 1)
+	signal.Notify(cancel, syscall.SIGTERM, syscall.SIGINT)
 
 	next := make(chan []string)
 	err := make(chan error)
@@ -23,10 +23,8 @@ func main() {
 loop:
 	for {
 		select {
-		case <-quit:
+		case <-cancel:
 			fmt.Println()
-			fmt.Println("Bye ❤️")
-			return
 		case err := <-err:
 			fmt.Fprintln(os.Stderr, "<SCAN ERROR>", err)
 			isReading = true
