@@ -360,6 +360,13 @@ func (env env) special(expr []string) (found bool, err error) {
 				shell = userShell
 			}
 		}
+		if len(expr) > 1 {
+			atoms := make([]string, len(expr[1:]))
+			for i, atom := range expr[1:] {
+				atoms[i] = fmt.Sprintf(`"%s"`, atom)
+			}
+			return true, stdAttachCmd(shell, "-c", strings.Join(atoms, " ")).Run()
+		}
 		return true, stdAttachCmd(shell).Run()
 
 	case "exa", "yac":
