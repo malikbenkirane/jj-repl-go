@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	reader "github.com/4sp1/jrl/internal/repl"
@@ -26,6 +27,12 @@ func main() {
 
 	var isReading bool
 
+	var env env
+	env.history = &history{
+		entries: make([][]string, 4),
+		size:    4,
+	}
+
 loop:
 	for {
 		select {
@@ -37,7 +44,7 @@ loop:
 			fmt.Fprintln(os.Stderr, "<SCAN ERROR>", err)
 		case expr := <-next:
 			isReading = false
-			found, err := special(expr)
+			found, err := env.special(expr)
 			if err != nil {
 				if errors.Is(err, ErrExit) {
 					fmt.Println()
@@ -58,6 +65,9 @@ loop:
 			if err := cmd.Run(); err != nil {
 				fmt.Fprintln(os.Stderr, "<CMD ERROR>", err)
 			}
+			if len(expr) > 1 {
+				env.save(expr)
+			}
 		default:
 			if !isReading {
 				fmt.Print("> ")
@@ -68,10 +78,32 @@ loop:
 	}
 }
 
+type env struct {
+	history *history
+}
+
+type history struct {
+	index   int
+	size    int
+	entries [][]string
+}
+
+func (env env) save(expr []string) {
+	h := env.history
+	if h.index == h.size-1 {
+		for i := range h.size - 1 {
+			h.entries[i] = h.entries[i+1]
+		}
+	} else {
+		h.index++
+	}
+	h.entries[h.index] = expr
+}
+
 // ErrExit is returned when the REPL user requests to exit the session.
 var ErrExit = errors.New("EOREPL")
 
-func special(expr []string) (found bool, err error) {
+func (env env) special(expr []string) (found bool, err error) {
 	if len(expr) == 0 {
 		return false, nil
 	}
@@ -96,6 +128,15 @@ func special(expr []string) (found bool, err error) {
 	switch use[1:] {
 	case "quit", "exit", "bye":
 		return true, ErrExit
+	case "history":
+		for i := range env.history.index + 1 {
+			atoms := make([]string, len(env.history.entries[i]))
+			for i, atom := range env.history.entries[i] {
+				atoms[i] = fmt.Sprintf(`"%s"`, atom)
+			}
+			fmt.Println(strings.Join(atoms, " "))
+		}
+		return true, nil
 	case "sh":
 		shell := "sh"
 		{
