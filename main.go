@@ -244,6 +244,7 @@ func (env env) special(expr []string) (found bool, err error) {
 	extra := map[string]map[string][]string{
 		"yac": {
 			"prompt": {"--no-post", "--debug-prompt"},
+			"stash":  {"--debug-prompt"},
 		},
 		"exa": {
 			"tree": {"-T"},
@@ -363,7 +364,44 @@ func (env env) special(expr []string) (found bool, err error) {
 
 	case "exa", "yac":
 		cmd := use[1:]
-		return true, stdAttachCmd(cmd, parseDotArgs(extra[cmd], expr)...).Run()
+		args := parseDotArgs(extra[cmd], expr)
+		if cmd == "yac" && args.cmd == "stash" {
+			// The current dot‑args implementation lacks generic support for this case.
+			// Manually construct the arguments needed for this command, which requires
+			// a specific formatting and custom handling.
+			if env.stash.isNotOpen() {
+				fmt.Println("⚠️ No stash is currently open. Use `.stash [FILE]` to start one.")
+				return true, nil
+			}
+			// yac's `--stdout` flag is currently broken (see https://github.com/4sp1/yac/issues/3)
+			// so we capture the command's output manually.
+			// The intended logic would be:
+			//
+			// args.args = append([]string{"--stdout", env.stash.path}, args.args...)
+			//
+			// but for now we write directly to the stash file.
+			cmd := exec.Command("yac", "--debug-prompt")
+			if err := func() (err error) {
+				f, err := os.OpenFile(env.stash.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+				if err != nil {
+					return err
+				}
+				defer func() {
+					err = f.Close()
+				}()
+				cmd.Stdout = f
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					return err
+				}
+				fmt.Println("Written to", f.Name())
+				return nil
+			}(); err != nil {
+				return true, err
+			}
+			return true, nil
+		}
+		return true, stdAttachCmd(cmd, args.args...).Run()
 
 	case "ignore":
 		f, err := os.OpenFile(".gitignore", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -416,12 +454,21 @@ func stdAttachCmd(command string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-func parseDotArgs(dotArgs map[string][]string, expr []string) (args []string) {
+type dotArgs struct {
+	args []string
+	cmd  string
+}
+
+func parseDotArgs(dotArgs map[string][]string, expr []string) (args dotArgs) {
 	if len(expr) >= 2 && len(expr[1]) > 0 && expr[1][0] == '.' {
-		prepend, ok := dotArgs[expr[1][1:]]
+		cmd := expr[1][1:]
+		prepend, ok := dotArgs[cmd]
 		if ok {
-			return append(prepend, expr[2:]...)
+			args.cmd = cmd
+			args.args = append(prepend, expr[2:]...)
+			return args
 		}
 	}
-	return expr[1:]
+	args.args = expr[1:]
+	return args
 }
