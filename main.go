@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"strconv"
 	"strings"
 	"syscall"
@@ -27,13 +30,15 @@ func main() {
 
 	var isReading bool
 
-	var env env
-	env.history = &history{
-		entries: make([][]string, 4),
-		size:    4,
+	var env *env
+	{
+		newEnv, err := initEnv()
+		if err != nil {
+			fmt.Println("initEnv:", err)
+			os.Exit(1)
+		}
+		env = newEnv
 	}
-
-	env.stash = &stash{}
 
 loop:
 	for {
@@ -83,14 +88,118 @@ loop:
 type env struct {
 	history *history
 	stash   *stash
+	cache   string
+}
+
+func initEnv() (*env, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	env := &env{
+		history: &history{
+			size:    4,
+			entries: make([][]string, 4),
+		},
+		cache: path.Join(home, ".cache", "jrl"),
+	}
+	if err := os.MkdirAll(env.cache, 0700); err != nil {
+		return nil, err
+	}
+	stash, err := env.initStash()
+	if err != nil {
+		return nil, fmt.Errorf("initStash: %w", err)
+	}
+	env.stash = stash
+	return env, nil
+}
+
+func (env env) initStash() (*stash, error) {
+	stash := &stash{}
+	stash.cacheFile = path.Join(env.cache, "stash")
+	_, err := os.Stat(stash.cacheFile)
+	if os.IsNotExist(err) {
+		stash.path = ""
+		return stash, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := stash.cacheRead(); err != nil {
+		return nil, err
+	}
+	return stash, nil
 }
 
 type stash struct {
-	path string
+	path      string
+	cacheFile string
 }
 
-func (s stash) isOpen() bool {
-	return len(s.path) > 0
+var ErrStashIsNotOpen = errors.New("stash is not open")
+
+func (stash *stash) drop() error {
+	_, err := os.Stat(stash.cacheFile)
+	if os.IsNotExist(err) {
+		return ErrStashIsNotOpen
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(stash.cacheFile); err != nil {
+		return err
+	}
+	stash.path = ""
+	return nil
+}
+
+type ErrStashIsOpen struct {
+	file string
+}
+
+func (err *ErrStashIsOpen) Error() string {
+	return ("stash is open")
+}
+
+func (stash *stash) cacheRead() error {
+	f, err := os.Open(stash.cacheFile)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = f.Close()
+	}()
+	var b bytes.Buffer
+	if _, err := io.Copy(&b, f); err != nil {
+		return err
+	}
+	stash.path = strings.TrimSpace(b.String())
+	if stash.path == "" {
+		return fmt.Errorf("empty path")
+	}
+	return nil
+}
+
+func (stash *stash) cachePath(file string) error {
+	_, err := os.Stat(stash.cacheFile)
+	if os.IsNotExist(err) {
+		f, err := os.Create(stash.cacheFile)
+		if err != nil {
+			return err
+		}
+		if _, err := f.WriteString(file); err != nil {
+			return err
+		}
+		stash.path = file
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := stash.cacheRead(); err != nil {
+		return err
+	}
+	return &ErrStashIsOpen{stash.path}
 }
 
 func (s stash) isNotOpen() bool {
@@ -170,17 +279,25 @@ func (env env) special(expr []string) (found bool, err error) {
 				fmt.Println("Great! Your stash is saved. Use `.stash .drop` to clear it when you're ready.")
 				return true, nil
 			case ".drop":
-				if env.stash.isNotOpen() {
+				file := env.stash.path
+				err := env.stash.drop()
+				if errors.Is(err, ErrStashIsNotOpen) {
 					fmt.Println("⚠️ No stash is currently open. Use `.stash [FILE]` to start one.")
+					return true, nil
 				}
 				fmt.Println("Great! Your stash is dropped. You will need to manually remove it.")
-				fmt.Println("Your stash is located at", env.stash.path)
-				env.stash.path = ""
+				fmt.Println("Your stash is located at", file)
 				return true, nil
 			default:
-				if env.stash.isOpen() {
+				err := env.stash.cachePath(expr[1])
+				var errOpen *ErrStashIsOpen
+				if errors.As(err, &errOpen) {
 					fmt.Println("⚠️ Open stash in use. Please run `.stash .drop` first.")
+					fmt.Println("Stash currently points to", errOpen.file)
 					return true, nil
+				}
+				if err != nil {
+					return true, err
 				}
 				f, err := os.OpenFile(expr[1], os.O_APPEND|os.O_CREATE, 0600)
 				if err != nil {
@@ -199,10 +316,6 @@ func (env env) special(expr []string) (found bool, err error) {
 			fmt.Println("Usage: `.stash [FILE]` to start one, `.stash .write` to commit or `.stash .drop`.")
 			return true, nil
 		}
-		if env.stash.isOpen() {
-			fmt.Println("⚠️ Open stash in use. Please run `.stash .drop` first.")
-			return true, nil
-		}
 		f, err := os.CreateTemp("", "commit-stash-*")
 		if err != nil {
 			return true, err
@@ -212,6 +325,18 @@ func (env env) special(expr []string) (found bool, err error) {
 				fmt.Printf("⚠️ unable to close stash: %v", err)
 			}
 		}()
+		{
+			err := env.stash.cachePath(f.Name())
+			var errOpen *ErrStashIsOpen
+			if errors.As(err, &errOpen) {
+				fmt.Println("⚠️ Open stash in use. Please run `.stash .drop` first.")
+				fmt.Println("Stash currently points to", errOpen.file)
+				if err := os.Remove(f.Name()); err != nil {
+					return true, err
+				}
+				return true, nil
+			}
+		}
 		fmt.Println("Good, your commit stash now points to", f.Name())
 		env.stash.path = f.Name()
 		return true, nil
@@ -225,6 +350,7 @@ func (env env) special(expr []string) (found bool, err error) {
 			fmt.Println(strings.Join(atoms, " "))
 		}
 		return true, nil
+
 	case "sh":
 		shell := "sh"
 		{
@@ -234,9 +360,11 @@ func (env env) special(expr []string) (found bool, err error) {
 			}
 		}
 		return true, stdAttachCmd(shell).Run()
+
 	case "exa", "yac":
 		cmd := use[1:]
 		return true, stdAttachCmd(cmd, parseDotArgs(extra[cmd], expr)...).Run()
+
 	case "ignore":
 		f, err := os.OpenFile(".gitignore", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
@@ -259,6 +387,7 @@ func (env env) special(expr []string) (found bool, err error) {
 			fmt.Println("✅", name, "added to .gitignore")
 		}
 		return true, nil
+
 	default:
 		if len(use) >= 2 && use[1] == '.' {
 			n := 4
