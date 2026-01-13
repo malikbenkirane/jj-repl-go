@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	reader "github.com/4sp1/jrl/internal/repl"
@@ -129,6 +130,17 @@ func special(expr []string) (found bool, err error) {
 			fmt.Println("✅", name, "added to .gitignore")
 		}
 		return true, nil
+	default:
+		if len(use) >= 2 && use[1] == '.' {
+			n := 4
+			if len(use) >= 3 {
+				n, err = strconv.Atoi(use[2:])
+				if err != nil {
+					return true, err
+				}
+			}
+			return true, stdAttachCmd("jj", "log", "--limit", strconv.Itoa(n)).Run()
+		}
 	}
 	specialHelp()
 	return false, fmt.Errorf("unknown command %q", use)
