@@ -202,6 +202,21 @@ func (stash *stash) cachePath(file string) error {
 	return &ErrStashIsOpen{stash.path}
 }
 
+func (stash stash) writeFrom(r io.Reader) (err error) {
+	if stash.isNotOpen() {
+		return ErrStashIsNotOpen
+	}
+	f, err := os.OpenFile(stash.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, f.Close())
+	}()
+	_, err = io.Copy(f, r)
+	return err
+}
+
 func (s stash) isNotOpen() bool {
 	return len(s.path) == 0
 }
