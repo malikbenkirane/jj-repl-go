@@ -271,6 +271,27 @@ func (env env) special(expr []string) (found bool, err error) {
 	case "stash":
 		if len(expr) >= 2 {
 			switch expr[1] {
+			case ".read":
+				var b bytes.Buffer
+				args := []string{"show"}
+				if len(expr[1:]) > 1 {
+					args = append(args, expr[2:]...)
+				}
+				cmd := exec.Command("jj", args...)
+				cmd.Stdout = &b
+				if err := cmd.Run(); err != nil {
+					return true, err
+				}
+				err := env.stash.writeFrom(&b)
+				if errors.Is(err, ErrStashIsNotOpen) {
+					fmt.Println("⚠️ No stash is currently open. Use `.stash [FILE]` to start one.")
+					return true, nil
+				}
+				if err != nil {
+					return true, err
+				}
+				fmt.Printf("Alright, jj%v output cat with %s\n", args, env.stash.path)
+				return true, nil
 			case ".write":
 				if env.stash.isNotOpen() {
 					fmt.Println("⚠️ No stash is currently open. Use `.stash [FILE]` to start one.")
