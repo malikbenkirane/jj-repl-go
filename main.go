@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -319,6 +320,36 @@ func (env env) special(expr []string) (found bool, err error) {
 				}
 				fmt.Println("Great! Your stash is saved. Use `.stash .drop` to clear it when you're ready.")
 				return true, nil
+			case ".clear":
+				return true, func() error {
+					file := env.stash.path
+					f, err := os.Open(file)
+					if err != nil {
+						return err
+					}
+					var b bytes.Buffer
+					if _, err := io.Copy(&b, f); err != nil {
+						return err
+					}
+					fmt.Println(b.String())
+					fmt.Println()
+					fmt.Println("⚠️ Are you certain you wish to clear this stash? (y: confirms action)")
+					reader := bufio.NewReader(os.Stdin)
+					line, _ := reader.ReadString('\n')
+					line = strings.TrimSpace(line)
+					switch line {
+					case "y":
+						_, err = os.Create(file)
+						if err != nil {
+							return err
+						}
+						fmt.Println("✅ Alright, your stash has been cleared:")
+					default:
+						fmt.Println("😊 Your stash remains safely stored:")
+					}
+					fmt.Println(file)
+					return nil
+				}()
 			case ".drop":
 				file := env.stash.path
 				err := env.stash.drop()
