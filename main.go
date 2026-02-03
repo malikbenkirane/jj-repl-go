@@ -8,81 +8,18 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path"
 	"strconv"
 	"strings"
-	"syscall"
 
-	reader "github.com/4sp1/jrl/internal/repl"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
-	cancel := make(chan os.Signal, 1)
-	signal.Notify(cancel, syscall.SIGTERM, syscall.SIGINT)
-
-	next := make(chan []string)
-	defer close(next)
-
-	err := make(chan error)
-	defer close(err)
-
-	eval := reader.NewEval(next, err)
-
-	var isReading bool
-
-	var env *env
-	{
-		newEnv, err := initEnv()
-		if err != nil {
-			fmt.Println("initEnv:", err)
-			os.Exit(1)
-		}
-		env = newEnv
-	}
-
-loop:
-	for {
-		select {
-		case <-cancel:
-			isReading = false
-			fmt.Println()
-		case err := <-err:
-			isReading = false
-			fmt.Fprintln(os.Stderr, "<SCAN ERROR>", err)
-		case expr := <-next:
-			isReading = false
-			found, err := env.special(expr)
-			if err != nil {
-				if errors.Is(err, ErrExit) {
-					fmt.Println()
-					fmt.Println("Bye ❤️")
-					return
-				}
-				fmt.Fprintln(os.Stderr, "<SPECIAL CMD ERROR>", err)
-				continue loop
-			}
-			if found {
-				fmt.Println("<SPECIAL CMD 👍>")
-				continue loop
-			}
-			cmd := exec.Command("jj", expr...)
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				fmt.Fprintln(os.Stderr, "<CMD ERROR>", err)
-			}
-			if len(expr) > 1 {
-				env.save(expr)
-			}
-		default:
-			if !isReading {
-				fmt.Print("> ")
-				go eval.Scan(os.Stdin)
-				isReading = true
-			}
-		}
+	p := tea.NewProgram(Model{})
+	if _, err := p.Run(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 }
 
